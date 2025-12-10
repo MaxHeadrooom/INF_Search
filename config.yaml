@@ -1,0 +1,15 @@
+
+db:
+  host: mongodb://localhost:27017/
+  database: ir_search_engine
+  collection: pages
+
+logic:
+  crawl_delay: 0.3
+  # max_pages: 50
+  max_pages: 51000
+
+sitemaps:
+  - https://www.forbes.ru/sitemap.xml
+  - https://ria.ru/sitemap_tag.xml
+
