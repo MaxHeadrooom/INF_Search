@@ -9,17 +9,19 @@
 #include <cmath> 
 #include <iomanip> 
 #include <stdexcept>
+#include <memory> 
+#include <limits> 
 
 using namespace std;
 namespace fs = std::filesystem;
 
-const string DIR_PATH = "../dataset_txt"; 
-const string DICT_PATH = "../resources/russian_lemmas.txt"; 
-const string INV_INDEX_PATH = "inverted_index_vbyte.txt"; 
-const string DOC_NAMES_PATH = "doc_names.txt";
-const string DOC_LENGTHS_PATH = "doc_lengths.txt"; 
+const string DIR_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\dataset_txt"; 
+const string DICT_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\resources\\lemmas.txt"; 
+const string INV_INDEX_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\inverted_index_vbyte.txt"; 
+const string DOC_NAMES_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\doc_names.txt";
+const string DOC_LENGTHS_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\doc_lengths.txt"; 
 
-#define HASH_SIZE 1000001 
+const size_t HASH_SIZE = 10000; 
 
 struct Hasher {
     size_t operator()(const string& key) const {
@@ -34,7 +36,8 @@ struct Hasher {
 
 template <typename K, typename V>
 struct CustomHashMap {
-    vector<pair<K, V>> buckets[HASH_SIZE];
+
+    vector<pair<K, V>> buckets[HASH_SIZE]; 
     Hasher hasher;
 
     void insert(const K& key, const V& value) {
@@ -55,7 +58,7 @@ struct CustomHashMap {
                 return &pair.second;
             }
         }
-        return nullptr; 
+        return nullptr;
     }
 
     const V* find(const K& key) const {
@@ -75,7 +78,8 @@ struct CustomHashMap {
     V& at(const K& key) {
         V* value_ptr = find(key);
         if (value_ptr == nullptr) {
-            throw out_of_range("Key not found in CustomHashMap");
+            cerr << "ERROR: Key not found in CustomHashMap." << endl;
+            exit(1); 
         }
         return *value_ptr;
     }
@@ -83,8 +87,7 @@ struct CustomHashMap {
     V& operator[](const K& key) {
         V* value_ptr = find(key);
         if (value_ptr == nullptr) {
-            V defaultValue = V(); 
-            insert(key, defaultValue);
+            insert(key, V{}); 
             return at(key); 
         }
         return *value_ptr;
@@ -92,18 +95,20 @@ struct CustomHashMap {
 
     size_t size() const {
         size_t total = 0;
-        for (int i = 0; i < HASH_SIZE; ++i) {
+        for (size_t i = 0; i < HASH_SIZE; ++i) {
             total += buckets[i].size();
         }
         return total;
     }
     
     struct Iterator {
+        vector<pair<K, V>>* buckets_base_ptr;
         vector<pair<K, V>>* current_bucket_ptr;
         typename vector<pair<K, V>>::iterator inner_it;
-        int array_size;
- 
-        Iterator(vector<pair<K, V>>* buckets_array, int start_index, int size) : 
+        size_t array_size;
+        
+        Iterator(vector<pair<K, V>>* buckets_array, size_t start_index, size_t size) : 
+            buckets_base_ptr(buckets_array),
             current_bucket_ptr(buckets_array + start_index), 
             array_size(size) 
         {
@@ -114,11 +119,11 @@ struct CustomHashMap {
                  current_bucket_ptr = buckets_array + array_size; 
             }
         }
-       
+        
         void skip_empty_buckets() {
-            while (current_bucket_ptr < (buckets_array + array_size) && inner_it == current_bucket_ptr->end()) {
+            while (current_bucket_ptr < (buckets_base_ptr + array_size) && inner_it == current_bucket_ptr->end()) {
                 current_bucket_ptr++;
-                if (current_bucket_ptr < (buckets_array + array_size)) {
+                if (current_bucket_ptr < (buckets_base_ptr + array_size)) {
                     inner_it = current_bucket_ptr->begin();
                 }
             }
@@ -149,10 +154,11 @@ struct CustomHashMap {
     }
 };
 
-CustomHashMap<string, string> lemmas;
-CustomHashMap<string, vector<uint8_t>> inv_index; 
-CustomHashMap<int, string> doc_names;
-CustomHashMap<int, int> doc_lengths; 
+CustomHashMap<string, string>* lemmas = nullptr; 
+CustomHashMap<string, vector<uint8_t>>* inv_index = nullptr; 
+CustomHashMap<int, string>* doc_names = nullptr; 
+CustomHashMap<int, int>* doc_lengths = nullptr; 
+
 long long total_docs_count = 0;
 
 bool is_cont(unsigned char b) { return (b & 0xC0) == 0x80; }
@@ -173,7 +179,7 @@ string to_utf8(const vector<uint32_t> &v) {
         if (c <= 0x7F) res.push_back((char)c);
         else if (c <= 0x7FF) { res.push_back((char)(0xC0 | ((c >> 6) & 0x1F))); res.push_back((char)(0x80 | (c & 0x3F))); }
         else if (c <= 0xFFFF) { res.push_back((char)(0xE0 | ((c >> 12) & 0x0F))); res.push_back((char)(0x80 | ((c >> 6) & 0x3F))); res.push_back((char)(0x80 | (c & 0x3F))); }
-        else { res.push_back((char)(0xF0 | ((c >> 18) & 0x07))); res.push_back((char)(0x80 | ((c >> 12) & 0x3F))); res.push_back((char)(0x80 | ((c >> 6) & 0x3F))); res.push_back((char)(0x80 | (c & 0x3F))); }
+        else { res.push_back((char)(0xF0 | ((c >> 18) & 0x07))); res.push_back((char)(0xC0 | ((c >> 12) & 0x3F))); res.push_back((char)(0x80 | ((c >> 6) & 0x3F))); res.push_back((char)(0x80 | (c & 0x3F))); }
     } return res;
 }
 uint32_t char_lower(uint32_t c) {
@@ -185,7 +191,6 @@ bool check_sym(uint32_t c) {
 string str_lower(const string &s) {
     vector<uint32_t> v = to_codes(s); for (auto &c : v) c = char_lower(c); return to_utf8(v);
 }
-
 
 vector<string> parse(const string &text) {
     vector<string> res; 
@@ -201,7 +206,7 @@ vector<string> parse(const string &text) {
                 string raw = to_utf8(cur); 
                 string low = str_lower(raw); 
                 
-                string* lemma_ptr = lemmas.find(low);
+                string* lemma_ptr = lemmas->find(low);
                 
                 if (lemma_ptr != nullptr) {
                     res.push_back(*lemma_ptr); 
@@ -215,7 +220,8 @@ vector<string> parse(const string &text) {
     if (!cur.empty()) { 
         string raw = to_utf8(cur); 
         string low = str_lower(raw); 
-        string* lemma_ptr = lemmas.find(low);
+        
+        string* lemma_ptr = lemmas->find(low);
         
         if (lemma_ptr != nullptr) {
             res.push_back(*lemma_ptr);
@@ -243,11 +249,11 @@ bool load_dict() {
         
         if (ss >> key) {
             if (ss >> val) {
-                lemmas.insert(str_lower(key), str_lower(val));
+                lemmas->insert(str_lower(key), str_lower(val));
             }
         }
     }
-    cout << "Dictionary loaded. Total entries: " << lemmas.size() << endl;
+    cout << "Dictionary loaded. Total entries: " << lemmas->size() << endl;
     return true;
 }
 
@@ -278,13 +284,36 @@ int vbyte_decode(const vector<uint8_t>& data, size_t& offset) {
     return n;
 }
 
+struct SearchResult {
+    int doc_id;
+    double score;
+};
+
+vector<pair<int, int>> decompress_posting_list(const vector<uint8_t>& compressed_data) {
+    vector<pair<int, int>> postings;
+    size_t offset = 0;
+    int last_doc_id = 0;
+
+    while (offset < compressed_data.size()) {
+        int delta_id = vbyte_decode(compressed_data, offset);
+        if (offset >= compressed_data.size() && delta_id != 0) break;
+        
+        int count = vbyte_decode(compressed_data, offset);
+
+        int doc_id = last_doc_id + delta_id;
+        postings.push_back({doc_id, count});
+        last_doc_id = doc_id;
+    }
+    return postings;
+}
+
 void save_doc_data() {
     ofstream out_names(DOC_NAMES_PATH, ios::binary);
-    for (const auto& pair : doc_names) out_names << pair.first << "\t" << pair.second << "\n";
+    for (const auto& pair : *doc_names) out_names << pair.first << "\t" << pair.second << "\n";
     out_names.close();
 
     ofstream out_lens(DOC_LENGTHS_PATH, ios::binary);
-    for (const auto& pair : doc_lengths) out_lens << pair.first << "\t" << pair.second << "\n";
+    for (const auto& pair : *doc_lengths) out_lens << pair.first << "\t" << pair.second << "\n";
     out_lens.close();
 }
 
@@ -294,10 +323,10 @@ void save_inverted_index(long long total_docs) {
     
     long long total_bytes = 0;
 
-    for (const auto& pair : inv_index) {
+    for (const auto& pair : *inv_index) {
         const string& lemma = pair.first;
         const vector<uint8_t>& compressed_data = pair.second;
-
+        
         out << lemma << " ";
         out << compressed_data.size() << " ";
         out.write(reinterpret_cast<const char*>(compressed_data.data()), compressed_data.size());
@@ -311,7 +340,7 @@ void save_inverted_index(long long total_docs) {
 
 bool load_data() {
     cout << "Loading existing index and data..." << endl;
-
+    
     ifstream f_names(DOC_NAMES_PATH, ios::binary);
     if (!f_names.is_open()) return false;
     string line;
@@ -319,7 +348,7 @@ bool load_data() {
         stringstream ss(line); int id; string name;
         if (ss >> id) { 
             getline(ss >> std::ws, name); 
-            doc_names.insert(id, name); 
+            doc_names->insert(id, name); 
         }
     }
     
@@ -327,7 +356,7 @@ bool load_data() {
     if (!f_lens.is_open()) return false;
     while (getline(f_lens, line)) {
         stringstream ss(line); int id, len;
-        if (ss >> id >> len) doc_lengths.insert(id, len);
+        if (ss >> id >> len) doc_lengths->insert(id, len);
     }
 
     ifstream f_inv(INV_INDEX_PATH, ios::binary);
@@ -359,75 +388,68 @@ bool load_data() {
         
         f_inv.get(separator);
         
-        inv_index.insert(lemma, compressed_data);
+        inv_index->insert(lemma, compressed_data);
     }
     
-    if (total_docs_count == 0 || inv_index.size() == 0) {
+    if (total_docs_count == 0 || inv_index->size() == 0) {
         cout << "Index file loaded but is empty or corrupted." << endl;
         return false;
     }
-    cout << "Index loaded. Documents: " << total_docs_count << ", Unique lemmas: " << inv_index.size() << endl;
+    cout << "Index loaded. Documents: " << total_docs_count << ", Unique lemmas: " << inv_index->size() << endl;
     return true;
-}
-
-
-struct SearchResult {
-    int doc_id;
-    double score;
-};
-
-vector<pair<int, int>> decompress_posting_list(const vector<uint8_t>& compressed_data) {
-    vector<pair<int, int>> postings;
-    size_t offset = 0;
-    int last_doc_id = 0;
-
-    while (offset < compressed_data.size()) {
-        int delta_id = vbyte_decode(compressed_data, offset);
-        if (offset >= compressed_data.size() && delta_id != 0) break;
-        
-        int count = vbyte_decode(compressed_data, offset);
-
-        int doc_id = last_doc_id + delta_id;
-        postings.push_back({doc_id, count});
-        last_doc_id = doc_id;
-    }
-    return postings;
 }
 
 void search_mode() {
     cout << "\n=== TF-IDF SEARCH MODE (V-Byte Compressed) ===" << endl;
+    
+    cin.clear();
+    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
+    
     string query;
     while (true) {
-        cout << "\nQuery: "; getline(cin, query);
-        if (query == "exit") break; 
-        if (query.empty()) continue;
+        cout << "\nQuery: "; 
+    
+        if (!getline(cin, query)) {
+            if (cin.eof()) {
+                cout << "\n[INFO] Поток ввода закрыт (обнаружен EOF). Выход из режима поиска." << endl;
+            } else if (cin.fail()) {
+                cout << "\n[ERROR] Ошибка чтения ввода. Выход из режима поиска." << endl;
+            }
+            break; 
+        }
 
+        if (query == "exit") {
+            cout << "Exiting search mode..." << endl;
+            break;
+        } 
+        if (query.empty()) {
+            continue;
+        }
+        
         vector<string> q_words = parse(query); 
         if (q_words.empty()) {
             cout << "Query resulted in no searchable words." << endl;
             continue;
         }
-
+        
         CustomHashMap<int, double> doc_scores;
         CustomHashMap<int, int> doc_match_count;
-
-        vector<SearchResult> temp_results; 
-
+        
         for (const string& w : q_words) {
-             if (inv_index.count(w)) {
-                const vector<uint8_t>& compressed_data = inv_index.at(w);
+             if (inv_index->count(w)) {
+                const vector<uint8_t>& compressed_data = inv_index->at(w);
                 vector<pair<int, int>> postings = decompress_posting_list(compressed_data);
 
                 double idf = log((double)total_docs_count / postings.size());
                 
                 for (const auto& entry : postings) {
                     int doc_id = entry.first;
-                    int count = entry.second;
+                    int count = entry.second; 
 
-                    if (!doc_lengths.count(doc_id)) continue; 
-
-                    double tf = (double)count / doc_lengths.at(doc_id);
-
+                    if (!doc_lengths->count(doc_id)) continue; 
+                    
+                    double tf = (double)count / doc_lengths->at(doc_id);
+                    
                     doc_scores[doc_id] += tf * idf;
                     doc_match_count[doc_id]++;
                 }
@@ -457,16 +479,25 @@ void search_mode() {
             cout << "Found " << results.size() << " documents (sorted by relevance):" << endl;
             cout << fixed << setprecision(6); 
             for (size_t i = 0; i < min(results.size(), (size_t)10); ++i) {
-                cout << "[" << i+1 << "] Score: " << results[i].score << " | File: " << doc_names.at(results[i].doc_id) << endl;
+                cout << "[" << i+1 << "] Score: " << results[i].score << " | File: " << doc_names->at(results[i].doc_id) << endl;
             }
         }
     }
 }
 
 void start_process() {
+    lemmas = new CustomHashMap<string, string>(); 
+    inv_index = new CustomHashMap<string, vector<uint8_t>>(); 
+    doc_names = new CustomHashMap<int, string>(); 
+    doc_lengths = new CustomHashMap<int, int>(); 
+
+    cout << "--- Starting Inverted Indexer ---" << endl; 
     setlocale(LC_ALL, "Russian"); 
 
-    if (!load_dict()) return; 
+    if (!load_dict()) {
+        cerr << "FATAL: Dictionary loading failed. Exiting." << endl;
+        return; 
+    }
 
     if (load_data()) {
         cout << "Index and data loaded successfully. Starting search." << endl;
@@ -475,16 +506,23 @@ void start_process() {
     }
 
     cout << "Index not found or corrupted. Re-indexing with V-Byte compression..." << endl;
-
-    CustomHashMap<string, vector<pair<int, int>>> temp_inv_index;
+    
+    CustomHashMap<string, vector<pair<int, int>>>* temp_inv_index_ptr = 
+        new CustomHashMap<string, vector<pair<int, int>>>();
     
     int doc_id = 0;
-
+    
     try {
+        if (!fs::exists(DIR_PATH) || !fs::is_directory(DIR_PATH)) {
+            cerr << "FILESYSTEM FATAL: Dataset directory not found or is not a directory: " << DIR_PATH << endl;
+            delete temp_inv_index_ptr; 
+            return;
+        }
+
         for (const auto &entry : fs::directory_iterator(DIR_PATH)) {
             if (entry.path().extension() == ".txt") {
                 doc_id++;
-                doc_names.insert(doc_id, entry.path().filename().string());
+                doc_names->insert(doc_id, entry.path().filename().string());
                 
                 ifstream f(entry.path(), ios::binary);
                 if (!f.is_open()) {
@@ -494,7 +532,7 @@ void start_process() {
                 string s((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
                 
                 vector<string> v = parse(s);
-                doc_lengths.insert(doc_id, v.size()); 
+                doc_lengths->insert(doc_id, v.size()); 
 
                 CustomHashMap<string, int> local_counts;
                 for (const auto& w : v) {
@@ -502,7 +540,7 @@ void start_process() {
                 }
 
                 for (const auto& pair : local_counts) {
-                    temp_inv_index[pair.first].push_back({doc_id, pair.second});
+                    (*temp_inv_index_ptr)[pair.first].push_back({doc_id, pair.second});
                 }
                 
                 if (doc_id % 1000 == 0) cout << "Indexed: " << doc_id << " documents." << endl;
@@ -511,15 +549,16 @@ void start_process() {
     } catch (const fs::filesystem_error& e) {
         cerr << "Filesystem Error: " << e.what() << endl;
         cerr << "Check if the path " << DIR_PATH << " is correct." << endl;
+        delete temp_inv_index_ptr; // Очистка при ошибке
         return;
     }
 
     total_docs_count = doc_id;
     save_doc_data();
-
+    
     cout << "Starting V-Byte compression..." << endl;
     
-    for (const auto& pair : temp_inv_index) {
+    for (const auto& pair : *temp_inv_index_ptr) {
         const string& lemma = pair.first;
         const auto& postings = pair.second;
         
@@ -531,14 +570,17 @@ void start_process() {
             int count = entry.second;
             
             int delta = current_doc_id - last_doc_id; 
+            
             vbyte_encode(delta, compressed_data); 
             vbyte_encode(count, compressed_data); 
             
             last_doc_id = current_doc_id;
         }
-        inv_index.insert(lemma, compressed_data);
+        inv_index->insert(lemma, compressed_data);
     }
-    
+
+    delete temp_inv_index_ptr;
+
     save_inverted_index(doc_id);
     
     cout << "Re-indexing complete. Starting search." << endl;
@@ -547,5 +589,11 @@ void start_process() {
 
 int main() {
     start_process();
+
+    delete lemmas;
+    delete inv_index;
+    delete doc_names;
+    delete doc_lengths;
+
     return 0;
 }
