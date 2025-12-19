@@ -545,7 +545,7 @@ void start_process() {
     } catch (const fs::filesystem_error& e) {
         cerr << "Filesystem Error: " << e.what() << endl;
         cerr << "Check if the path " << DIR_PATH << " is correct." << endl;
-        delete temp_inv_index_ptr; // Очистка при ошибке
+        delete temp_inv_index_ptr;
         return;
     }
 
@@ -592,4 +592,5 @@ int main() {
     delete doc_lengths;
 
     return 0;
+
 }
