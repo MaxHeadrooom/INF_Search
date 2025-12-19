@@ -403,18 +403,13 @@ void search_mode() {
     cout << "\n=== TF-IDF SEARCH MODE (V-Byte Compressed) ===" << endl;
     
     cin.clear();
-    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
+
     
     string query;
     while (true) {
-        cout << "\nQuery: "; 
-    
+        cout << "Query: " << flush; 
+
         if (!getline(cin, query)) {
-            if (cin.eof()) {
-                cout << "\n[INFO] Поток ввода закрыт (обнаружен EOF). Выход из режима поиска." << endl;
-            } else if (cin.fail()) {
-                cout << "\n[ERROR] Ошибка чтения ввода. Выход из режима поиска." << endl;
-            }
             break; 
         }
 
@@ -482,6 +477,7 @@ void search_mode() {
                 cout << "[" << i+1 << "] Score: " << results[i].score << " | File: " << doc_names->at(results[i].doc_id) << endl;
             }
         }
+        cout.flush(); 
     }
 }
 
