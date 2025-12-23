@@ -14,7 +14,6 @@ def create_lemma_dict():
 
     print(" начало")
 
-    # Читаем все файлы и собираем уникальные слова
     files = sorted(os.listdir(DATASET_DIR))
     total_files = len(files)
     processed_files = 0
@@ -27,7 +26,6 @@ def create_lemma_dict():
         try:
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read().lower()
-                # Ищем слова (русские буквы, включая ё)
                 words = re.findall(r'[а-яё]+', text)
                 unique_words.update(words)
         except Exception as e:
@@ -60,3 +58,4 @@ def create_lemma_dict():
 
 if __name__ == "__main__":
     create_lemma_dict()
+
