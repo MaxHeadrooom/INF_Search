@@ -20,7 +20,7 @@ class TestIndexer(unittest.TestCase):
             raise FileNotFoundError(f"Словарь лемм не найден: {DICT_PATH}")
 
         txt_files = list(DATASET_DIR.glob("*.txt"))
-        if len(txt_files) < 100:  # у тебя 51000, так что ок
+        if len(txt_files) < 100: 
             raise ValueError(f"Ожидается много txt-файлов, найдено: {len(txt_files)}")
 
     def run_program(self, input_text: str, timeout: int = 300) -> str:
@@ -127,4 +127,5 @@ class TestIndexer(unittest.TestCase):
 
 
 if __name__ == '__main__':
+
     unittest.main(verbosity=2)
