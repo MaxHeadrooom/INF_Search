@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
 CONFIG_FILE = "config.yaml"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StudentIRBot/1.0; +http://mai.ru)"}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 MONGO_FIELDS = ["url", "raw_html", "source", "download_timestamp"]
 
 
@@ -121,4 +121,5 @@ def run_crawler():
 
 
 if __name__ == "__main__":
+
     run_crawler()
