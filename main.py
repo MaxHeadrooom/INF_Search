@@ -1,5 +1,4 @@
 import requests
-import re
 import os
 import time
 import random
@@ -123,3 +122,4 @@ def run_crawler():
 if __name__ == "__main__":
 
     run_crawler()
+
