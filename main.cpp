@@ -629,7 +629,7 @@ int main() {
             if (inv_index.size() == 0) {
                 if (load_index()) {
                 } else {
-                    cout << "Нет готового индекса. Сначала выполните перестроение (1).\n";
+                    cout << "Нет готового индекс.\n";
                     continue;
                 }
             }
@@ -639,4 +639,5 @@ int main() {
     }
 
     return 0;
+
 }
