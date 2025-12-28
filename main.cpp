@@ -22,6 +22,7 @@ const string DICT_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\resources\\lemm
 const string INV_INDEX_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\inverted_index.bin";
 const string DOC_NAMES_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\doc_names.txt";
 const string DOC_LENGTHS_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\doc_lengths.txt";
+const string DOC_URLS_PATH = "C:\\Users\\fedor\\PycharmProjects\\gg\\urls.txt"; 
 
 const size_t HASH_SIZE = 10000; 
 
@@ -96,7 +97,8 @@ struct CustomHashMap {
 CustomHashMap<string, string> lemmas; 
 CustomHashMap<string, vector<uint8_t>> inv_index; 
 CustomHashMap<int, string> doc_names; 
-CustomHashMap<int, int> doc_lengths; 
+CustomHashMap<int, int> doc_lengths;
+CustomHashMap<int, string> doc_urls;
 long long total_docs_count = 0;
 
 bool is_cont(unsigned char b) { return (b & 0xC0) == 0x80; }
@@ -117,6 +119,31 @@ vector<uint32_t> to_codes(const string &s) {
         if (fail) { ++i; continue; } res.push_back(val); i += 1 + n;
     }
     return res;
+}
+
+bool load_doc_urls() {
+    ifstream f(DOC_URLS_PATH);
+    if (!f.is_open()) {
+        cerr << "Не удалось открыть файл с URL: " << DOC_URLS_PATH << endl;
+        return false;
+    }
+
+    string line;
+    int loaded = 0;
+    while (getline(f, line)) {
+        if (line.empty()) continue;
+        stringstream ss(line);
+        int id;
+        string url;
+        if (ss >> id && getline(ss, url)) {
+            size_t start = url.find_first_not_of(" \t");
+            if (start != string::npos) url = url.substr(start);
+            doc_urls.insert(id, url);
+            loaded++;
+        }
+    }
+    cout << "Загружено " << loaded << " URL из " << DOC_URLS_PATH << endl;
+    return true;
 }
 
 string to_utf8(const vector<uint32_t> &v) {
@@ -154,18 +181,17 @@ vector<string> parse(const string &text) {
     vector<uint32_t> codes = to_codes(text); 
     vector<uint32_t> cur;
     for (uint32_t c : codes) {
-        if (check_sym(c)) cur.push_back(c);
-        else if (!cur.empty()) {
-            string low = str_lower(to_utf8(cur));
-            string* lem_ptr = lemmas.find(low);
-            res.push_back(lem_ptr ? *lem_ptr : low);
+        if (check_sym(c)) {
+            cur.push_back(char_lower(c));  
+        } else if (!cur.empty()) {
+            string low = to_utf8(cur);
+            res.push_back(low);
             cur.clear();
         }
     }
     if (!cur.empty()) {
-        string low = str_lower(to_utf8(cur));
-        string* lem_ptr = lemmas.find(low);
-        res.push_back(lem_ptr ? *lem_ptr : low);
+        string low = to_utf8(cur);
+        res.push_back(low);
     }
     return res;
 }
@@ -228,12 +254,11 @@ void boolean_search() {
         cout.flush();
 
         if (!getline(cin, query)) {
-            break; 
+            break;
         }
         if (query == "exit") {
             break;
         }
-
         if (query.empty()) {
             cout << "Results: No documents match.\n";
             continue;
@@ -242,12 +267,14 @@ void boolean_search() {
         stringstream ss(query);
         string token;
 
-        set<int> must_have;
-        set<int> must_not;
-        set<int> should_have;
+        set<int> must_have;  
+        set<int> must_not;    
+        set<int> should_have; 
 
         bool has_plus = false;
         bool has_regular = false;
+
+        vector<string> plus_terms;
 
         while (ss >> token) {
             char prefix = ' ';
@@ -265,10 +292,12 @@ void boolean_search() {
             }
             string word = parsed[0];
 
+            if (prefix == '+') {
+                plus_terms.push_back(word);  
+            }
+
             if (!inv_index.count(word)) {
-                if (prefix == '+') {
-                    has_plus = true;
-                }
+                if (prefix == '+') has_plus = true;  
                 continue;
             }
 
@@ -298,9 +327,11 @@ void boolean_search() {
         }
 
         if (has_plus && must_have.empty()) {
-            cout << "Results: No documents match.\n";
+            cout << "Results: No documents match (required terms not found).\n";
             continue;
         }
+
+        cout << "Debug: has_plus = " << has_plus << ", must_have size = " << must_have.size()  << ", should_have size = " << should_have.size() << endl;
 
         vector<int> candidates;
 
@@ -309,9 +340,8 @@ void boolean_search() {
         } else if (has_regular) {
             candidates.assign(should_have.begin(), should_have.end());
         } else {
-            for (int i = 1; i <= total_docs_count; ++i) {
-                candidates.push_back(i);
-            }
+            cout << "Results: No documents match.\n";
+            continue;
         }
 
         vector<int> final_results;
@@ -320,14 +350,42 @@ void boolean_search() {
             final_results.push_back(doc_id);
         }
 
+        if (has_plus && !final_results.empty() && !plus_terms.empty()) {
+            vector<int> verified;
+            for (int doc_id : final_results) {
+                string filename = to_string(doc_id) + ".txt";
+                string file_path = DIR_PATH + "\\" + filename;
+
+                ifstream doc_file(file_path);
+                if (!doc_file.is_open()) continue;
+
+                string content((istreambuf_iterator<char>(doc_file)), istreambuf_iterator<char>());
+                doc_file.close();
+
+                string lower_content = str_lower(content);
+
+                bool all_present = true;
+                for (const string& term : plus_terms) {
+                    if (lower_content.find(term) == string::npos) {
+                        all_present = false;
+                        break;
+                    }
+                }
+                if (all_present) {
+                    verified.push_back(doc_id);
+                }
+            }
+            final_results = std::move(verified);
+        }
+
         cout << "Results: ";
         if (final_results.empty()) {
             cout << "No documents match.";
         } else {
             for (int doc_id : final_results) {
-                if (doc_names.count(doc_id)) {
-                    cout << doc_names[doc_id] << " ";
-                }
+                string* url_ptr = doc_urls.find(doc_id);
+                string url = url_ptr ? *url_ptr : "[doc_" + to_string(doc_id) + "]";
+                cout << url << " ";
             }
         }
         cout << endl;
@@ -337,6 +395,8 @@ void boolean_search() {
 void tf_idf_search() {
     cout << "\n=== TF-IDF SEARCH ===\n";
     string query;
+
+    const double MIN_SCORE = 0.05;  
 
     while (true) {
         cout << "TF-IDF Query: ";
@@ -379,15 +439,28 @@ void tf_idf_search() {
 
         vector<pair<double, int>> results;
         for (const auto& p : scores) {
-            results.emplace_back(p.second, p.first);
+            if (p.second >= MIN_SCORE) {  
+                results.emplace_back(p.second, p.first);
+            }
         }
+
+        if (results.empty()) {
+            cout << "No documents with sufficient relevance found.\n";
+            continue;
+        }
+
         sort(results.begin(), results.end(), greater<pair<double, int>>());
 
         size_t top_k = 10;
-        cout << "Top " << min(results.size(), top_k) << " results:\n";
+        cout << "Top " << min(results.size(), top_k);
         for (size_t i = 0; i < min(results.size(), top_k); ++i) {
-            cout << "File: " << doc_names[results[i].second]
-                 << " | Score: " << fixed << setprecision(6) << results[i].first << endl;
+            int doc_id = results[i].second;
+            double score = results[i].first;
+
+            string* url_ptr = doc_urls.find(doc_id);
+            string url = url_ptr ? *url_ptr : "[URL не найден для doc_id " + to_string(doc_id) + "]";
+
+            cout << url << " | Score: " << fixed << setprecision(6) << score << endl;
         }
     }
 }
@@ -454,27 +527,116 @@ void index_data() {
          << ", Terms: " << inv_index.size() << endl;
 }
 
+void save_index() {
+    ofstream inv_out(INV_INDEX_PATH, ios::binary);
+    if (!inv_out.is_open()) {
+        cerr << "Не могу сохранить inverted index!" << endl;
+        return;
+    }
+    for (auto& entry : inv_index) {
+        uint32_t term_len = entry.first.size();
+        inv_out.write(reinterpret_cast<char*>(&term_len), sizeof(term_len));
+        inv_out.write(entry.first.c_str(), term_len);
+
+        uint32_t data_size = entry.second.size();
+        inv_out.write(reinterpret_cast<char*>(&data_size), sizeof(data_size));
+        inv_out.write(reinterpret_cast<char*>(entry.second.data()), data_size);
+    }
+    inv_out.close();
+
+    ofstream len_out(DOC_LENGTHS_PATH);
+    for (auto& p : doc_lengths) {
+        len_out << p.first << " " << p.second << "\n";
+    }
+
+    ofstream names_out(DOC_NAMES_PATH);
+    for (auto& p : doc_names) {
+        names_out << p.first << " " << p.second << "\n";
+    }
+
+    cout << "Индекс сохранён." << endl;
+}
+
+bool load_index() {
+    ifstream inv_in(INV_INDEX_PATH, ios::binary);
+    if (!inv_in.is_open()) {
+        cout << "Файл индекса не найден: " << INV_INDEX_PATH << endl;
+        return false;
+    }
+
+    inv_index = CustomHashMap<string, vector<uint8_t>>();  
+    while (inv_in.peek() != EOF) {
+        uint32_t term_len;
+        if (!inv_in.read(reinterpret_cast<char*>(&term_len), sizeof(term_len))) break;
+        string term(term_len, '\0');
+        inv_in.read(&term[0], term_len);
+
+        uint32_t data_size;
+        inv_in.read(reinterpret_cast<char*>(&data_size), sizeof(data_size));
+        vector<uint8_t> data(data_size);
+        inv_in.read(reinterpret_cast<char*>(data.data()), data_size);
+
+        inv_index.insert(term, move(data));
+    }
+
+    ifstream len_in(DOC_LENGTHS_PATH);
+    int id, len;
+    while (len_in >> id >> len) {
+        doc_lengths.insert(id, len);
+    }
+
+    ifstream names_in(DOC_NAMES_PATH);
+    string name;
+    while (names_in >> id >> ws && getline(names_in, name)) {
+        if (!name.empty()) doc_names.insert(id, name);
+    }
+
+    total_docs_count = doc_lengths.size();
+    cout << "Индекс загружен: " << inv_index.size() << " терминов, " << total_docs_count << " документов." << endl;
+    return true;
+}
+
 int main() {
-    SetConsoleCP(CP_UTF8);     
+    SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
 
     if (!load_dictionary()) {
-        cerr << "Dictionary not found!\n";
+        cerr << "Словарь лемм не найден!" << endl;
         return 1;
     }
 
-    index_data(); 
+    load_doc_urls(); 
 
-    check_zipf();
-    
-    int choice;
-    cout << "\nChoose mode: 1-Boolean, 2-TF-IDF: ";
-    cin >> choice;
-    cin.ignore(9999999, '\n'); 
+    while (true) {
+        cout << "\n=== ПОИСКОВЫЙ ДВИЖОК ===\n";
+        cout << "1. Перестроить индекс\n";
+        cout << "2. Boolean поиск\n";
+        cout << "3. TF-IDF поиск\n";
+        cout << "4. Выход\n";
+        cout << "Выбор: ";
 
-    if (choice == 1) boolean_search();
-    else tf_idf_search();
+        int choice;
+        cin >> choice;
+        cin.ignore();
+
+        if (choice == 4) break;
+
+        if (choice == 1) {
+            index_data();
+            save_index();
+            check_zipf();
+        } else if (choice == 2 || choice == 3) {
+            if (inv_index.size() == 0) {
+                if (load_index()) {
+                } else {
+                    cout << "Нет готового индекса. Сначала выполните перестроение (1).\n";
+                    continue;
+                }
+            }
+            if (choice == 2) boolean_search();
+            else tf_idf_search();
+        }
+    }
 
     return 0;
-
 }
